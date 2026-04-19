@@ -17,9 +17,9 @@ services:
       context: .
       dockerfile: Dockerfile
     ports:
-      # Host port 3003 → container 3000. nginx reverse-proxies to :3003.
-      # (3001=tickethub, 3002=smellymelly, 3003=bizhub.)
-      - "3003:3000"
+      # Host port 3004 → container 3000. nginx reverse-proxies to :3004.
+      # (3001=tickethub, 3002=smellymelly, 3004=bizhub.)
+      - "3004:3000"
     env_file: .env.local
     environment:
       - UPLOADS_DIR=/uploads

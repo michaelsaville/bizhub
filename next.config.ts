@@ -4,7 +4,7 @@ const nextConfig: NextConfig = {
   output: 'standalone',
   experimental: {
     serverActions: {
-      allowedOrigins: ['localhost:3003', 'bizhub.pcc2k.com'],
+      allowedOrigins: ['localhost:3004', 'bizhub.pcc2k.com'],
     },
   },
 }

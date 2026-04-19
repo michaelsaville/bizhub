@@ -45,10 +45,10 @@ this pattern — the prod container doesn't include the Prisma CLI.)
 
 ## Ports
 
-- `3003` on the host → `3000` in the container
+- `3004` on the host → `3000` in the container
 - Behind nginx at `bizhub.pcc2k.com` (TLS via certbot)
 
-Sister apps use: `3001` (TicketHub), `3002` (Smelly Melly).
+Sister apps use: `3000` (DocHub), `3001` (TicketHub), `3002` (Smelly Melly), `3003` (PCC Scout API).
 
 ## Architecture
 
