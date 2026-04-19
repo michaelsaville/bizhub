@@ -1,0 +1,36 @@
+# BizHub deployment — separate compose from DocHub/TicketHub on purpose so
+# a bad restart here can never take either of them down. Attaches to the
+# shared `dochub_default` external network to reach the shared Postgres at
+# `db:5432` without touching DocHub's compose.
+#
+# Usage:
+#   docker compose -f ~/bizhub/docker-compose.yml up -d --build
+#   docker compose -f ~/bizhub/docker-compose.yml logs -f
+#   docker compose -f ~/bizhub/docker-compose.yml down
+
+services:
+  app:
+    image: bizhub:local
+    container_name: bizhub-app
+    restart: unless-stopped
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      # Host port 3003 → container 3000. nginx reverse-proxies to :3003.
+      # (3001=tickethub, 3002=smellymelly, 3003=bizhub.)
+      - "3003:3000"
+    env_file: .env.local
+    environment:
+      - UPLOADS_DIR=/uploads
+    volumes:
+      - bizhub_uploads:/uploads
+    networks:
+      - dochub_default
+
+networks:
+  dochub_default:
+    external: true
+
+volumes:
+  bizhub_uploads:

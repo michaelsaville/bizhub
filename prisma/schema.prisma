@@ -1,0 +1,245 @@
+// BizHub — AI business development engine (bid scanner + grant matcher + proposal generator).
+// Lives in the `bizdev` schema namespace on the shared Postgres, alongside
+// `dochub` and `tickethub`. NEVER `prisma db push` without the `schemas`
+// directive — the default behavior would try to drop the other schemas'
+// tables. See `feedback_tickethub_duplicate_create_paths.md` context.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  schemas  = ["bizdev"]
+}
+
+// ─── USERS ────────────────────────────────────────────────────────────────
+// Entra-linked user mirror. SSO via shared NextAuth secret; signIn callback
+// auto-provisions as VIEWER on first sign-in, admin promotes to ANALYST or
+// ADMIN. DocHub + TicketHub have their own user tables — do NOT try to
+// share rows across schemas; we just share the email address.
+
+enum BD_UserRole {
+  VIEWER
+  ANALYST
+  ADMIN
+
+  @@schema("bizdev")
+}
+
+model BD_User {
+  id        String      @id @default(cuid())
+  entraId   String      @unique
+  email     String      @unique
+  name      String
+  role      BD_UserRole @default(VIEWER)
+  isActive  Boolean     @default(true)
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+
+  proposals BD_Proposal[] @relation("BD_ProposalCreatedBy")
+
+  @@map("bd_users")
+  @@schema("bizdev")
+}
+
+// ─── BID OPPORTUNITIES ────────────────────────────────────────────────────
+// Scraped postings from SAM.gov, state portals, construction bid boards.
+// Source + externalId form the idempotency key for the poller.
+
+enum BD_OpportunityStatus {
+  NEW
+  REVIEWING
+  PURSUING
+  SUBMITTED
+  WON
+  LOST
+  DECLINED
+  EXPIRED
+
+  @@schema("bizdev")
+}
+
+model BD_BidOpportunity {
+  id            String               @id @default(cuid())
+  source        String               // "sam.gov", "wv-purchasing", "md-emp", etc.
+  externalId    String               // source's own ID
+  title         String
+  description   String?
+  agency        String?
+  state         String?              // two-letter; filter target
+  naicsCodes    String[]             // populated when source tags them
+  postingDate   DateTime?
+  closingDate   DateTime?
+  contractValueCentsLow  Int?
+  contractValueCentsHigh Int?
+  setAsideType  String?              // "small business", "8(a)", etc.
+  sourceUrl     String?
+  rawPayload    Json?                // full source response for later reprocessing
+  status        BD_OpportunityStatus @default(NEW)
+  matchScore    Int?                 // 0-100, populated by scoring pass
+  matchNotes    String?              // AI rationale for the score
+  createdAt     DateTime             @default(now())
+  updatedAt     DateTime             @updatedAt
+
+  proposals BD_Proposal[]
+
+  @@unique([source, externalId])
+  @@index([status])
+  @@index([closingDate])
+  @@map("bd_bid_opportunities")
+  @@schema("bizdev")
+}
+
+// ─── GRANT PROGRAMS ───────────────────────────────────────────────────────
+// Known grant programs from grants.gov, USDA RD, HUD, FEMA, USAC E-Rate,
+// state DEDs, utility rebate programs. A ClientGrantMatch links a program
+// to a specific client we think qualifies.
+
+enum BD_GrantStatus {
+  ACTIVE
+  UPCOMING
+  CLOSED
+
+  @@schema("bizdev")
+}
+
+model BD_GrantProgram {
+  id              String         @id @default(cuid())
+  source          String         // "grants.gov", "usda-rd", etc.
+  externalId      String?        // some programs are hand-curated (no externalId)
+  name            String
+  agency          String
+  description     String?
+  eligibility     Json?          // structured criteria (entity type, location, purpose)
+  fundingCycle    String?        // "annual", "rolling", "2026-06-15 deadline"
+  nextDeadline    DateTime?
+  maxAwardCents   Int?
+  matchRequired   String?        // "20% match", "none", etc.
+  sourceUrl       String?
+  status          BD_GrantStatus @default(ACTIVE)
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  clientMatches BD_ClientGrantMatch[]
+
+  @@unique([source, externalId])
+  @@index([status])
+  @@index([nextDeadline])
+  @@map("bd_grant_programs")
+  @@schema("bizdev")
+}
+
+// ─── CLIENT-TO-GRANT MATCHES ──────────────────────────────────────────────
+// Cross-app reference: `externalClientId` is the TH_Client id (string, no FK
+// across schemas — Prisma can't express cross-schema relations cleanly, and
+// we want bizhub to survive a TicketHub reset anyway).
+
+enum BD_MatchStatus {
+  SUGGESTED
+  REVIEWING
+  APPLYING
+  SUBMITTED
+  AWARDED
+  DECLINED
+  WITHDRAWN
+
+  @@schema("bizdev")
+}
+
+model BD_ClientGrantMatch {
+  id                String          @id @default(cuid())
+  externalClientId  String          // TH_Client.id — resolved at read time
+  clientNameCached  String          // snapshot so list views don't cross-join
+  grantId           String
+  grant             BD_GrantProgram @relation(fields: [grantId], references: [id], onDelete: Cascade)
+  matchScore        Int             // 0-100
+  matchNotes        String?
+  status            BD_MatchStatus  @default(SUGGESTED)
+  adminNotes        String?
+  submittedAt       DateTime?
+  decisionAt        DateTime?
+  awardedCents      Int?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+
+  proposals BD_Proposal[]
+
+  @@index([externalClientId])
+  @@index([status])
+  @@map("bd_client_grant_matches")
+  @@schema("bizdev")
+}
+
+// ─── PROPOSALS ────────────────────────────────────────────────────────────
+// Generated proposals — bid responses or grant applications. When pushed
+// into TicketHub as a draft estimate, `thEstimateId` records the cross-app
+// reference. PDF path is relative to the /uploads Docker volume.
+
+enum BD_ProposalKind {
+  BID_RESPONSE
+  GRANT_APPLICATION
+  SPECULATIVE
+
+  @@schema("bizdev")
+}
+
+enum BD_ProposalStatus {
+  DRAFT
+  REVIEW
+  SENT
+  ACCEPTED
+  REJECTED
+  WITHDRAWN
+
+  @@schema("bizdev")
+}
+
+model BD_Proposal {
+  id                   String            @id @default(cuid())
+  kind                 BD_ProposalKind
+  title                String
+  externalClientId     String?           // TH_Client.id, optional (speculative proposals)
+  clientNameCached     String?
+
+  // One of these two — the source of the proposal
+  bidOpportunityId     String?
+  bidOpportunity       BD_BidOpportunity? @relation(fields: [bidOpportunityId], references: [id])
+  grantMatchId         String?
+  grantMatch           BD_ClientGrantMatch? @relation(fields: [grantMatchId], references: [id])
+
+  body                 Json              // structured proposal content (sections, line items, compliance)
+  pdfPath              String?           // /uploads/proposals/<id>.pdf once generated
+  thEstimateId         String?           // TH_Estimate.id once pushed to TicketHub
+  status               BD_ProposalStatus @default(DRAFT)
+  totalCents           Int?
+
+  createdById          String
+  createdBy            BD_User           @relation("BD_ProposalCreatedBy", fields: [createdById], references: [id])
+  createdAt            DateTime          @default(now())
+  updatedAt            DateTime          @updatedAt
+  sentAt               DateTime?
+  decisionAt           DateTime?
+
+  @@index([status])
+  @@index([externalClientId])
+  @@index([thEstimateId])
+  @@map("bd_proposals")
+  @@schema("bizdev")
+}
+
+// ─── SETTINGS (encrypted) ─────────────────────────────────────────────────
+// Mirrors TH_Setting pattern: per-key encrypted values, singleton-style
+// rows keyed by a string name. API keys + feature toggles live here instead
+// of .env so admins can rotate from the UI without a rebuild.
+
+model BD_Setting {
+  key          String   @id
+  valueEncrypted String
+  updatedAt    DateTime @updatedAt
+  updatedById  String?
+
+  @@map("bd_settings")
+  @@schema("bizdev")
+}
