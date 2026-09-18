@@ -10,7 +10,13 @@ const MODULES = [
 
 const NAV = [
   { href: '/', label: 'Dashboard' },
-  { href: '/opportunities', label: 'Opportunities' },
+  { href: '/opportunities', label: 'Bids' },
+  { href: '/grants', label: 'Grants' },
+  { href: '/awards', label: 'Buyers' },
+  { href: '/businesses', label: 'New biz' },
+  { href: '/matches', label: 'Matches' },
+  { href: '/proposals', label: 'Proposals' },
+  { href: '/pipeline', label: 'Pipeline' },
 ]
 
 export default function TopBar() {
@@ -34,6 +40,14 @@ export default function TopBar() {
           </nav>
         </div>
         <div className="flex items-center gap-3">
+          <Link
+            href="/settings"
+            className="text-xs font-medium text-slate-500 hover:text-brand-600"
+            title="Settings"
+          >
+            ⚙ Settings
+          </Link>
+          <span className="text-slate-200">|</span>
           {MODULES.map((m) => (
             <a
               key={m.name}

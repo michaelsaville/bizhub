@@ -79,7 +79,10 @@ model BD_BidOpportunity {
   rawPayload    Json?                // full source response for later reprocessing
   status        BD_OpportunityStatus @default(NEW)
   matchScore    Int?                 // 0-100, populated by scoring pass
+  matchCategory String?              // short bucket, e.g. "Networking/Wi-Fi"
   matchNotes    String?              // AI rationale for the score
+  scoredAt      DateTime?
+  dismissedAt   DateTime?            // triage soft-hide
   createdAt     DateTime             @default(now())
   updatedAt     DateTime             @updatedAt
 
@@ -88,6 +91,7 @@ model BD_BidOpportunity {
   @@unique([source, externalId])
   @@index([status])
   @@index([closingDate])
+  @@index([matchScore])
   @@map("bd_bid_opportunities")
   @@schema("bizdev")
 }
@@ -119,6 +123,20 @@ model BD_GrantProgram {
   matchRequired   String?        // "20% match", "none", etc.
   sourceUrl       String?
   status          BD_GrantStatus @default(ACTIVE)
+
+  // AI relevance scoring — how well this program fits PCC2K's install/IT
+  // capabilities + WV/MD/PA footprint. Populated by the scorer pass, null
+  // until scored. relevanceCategory is a short bucket ("Physical Security",
+  // "Broadband", "Unrelated", etc.) for quick filtering.
+  relevanceScore    Int?
+  relevanceCategory String?
+  relevanceNotes    String?
+  scoredAt          DateTime?
+
+  // Triage: operator dismissed this program from the working list (soft-hide,
+  // never deleted — a re-poll would otherwise resurrect it).
+  dismissedAt       DateTime?
+
   createdAt       DateTime       @default(now())
   updatedAt       DateTime       @updatedAt
 
@@ -127,6 +145,7 @@ model BD_GrantProgram {
   @@unique([source, externalId])
   @@index([status])
   @@index([nextDeadline])
+  @@index([relevanceScore])
   @@map("bd_grant_programs")
   @@schema("bizdev")
 }
@@ -241,5 +260,122 @@ model BD_Setting {
   updatedById  String?
 
   @@map("bd_settings")
+  @@schema("bizdev")
+}
+
+// ─── NEW BUSINESSES (greenfield prospects) ──────────────────────────────────
+// Newly-registered PA businesses in PCC2K's border counties — greenfield MSP
+// prospects (a new business needs network, cameras, phones, IT). Thin signal
+// (name + entity type only), AI-scored for likely IT relevance.
+
+model BD_NewBusiness {
+  id                String    @id @default(cuid())
+  source            String    // "pa-dos"
+  externalId        String    // filing_number
+  name              String
+  entityType        String?
+  county            String?
+  city              String?
+  state             String?   @default("PA")
+  filedDate         DateTime?
+  sourceUrl         String?
+  rawPayload        Json?
+
+  relevanceScore    Int?
+  relevanceCategory String?
+  relevanceNotes    String?
+  scoredAt          DateTime?
+  dismissedAt       DateTime?
+
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  @@unique([source, externalId])
+  @@index([relevanceScore])
+  @@map("bd_new_businesses")
+  @@schema("bizdev")
+}
+
+// ─── FUNDED AWARDS (award-watch lead-gen) ─────────────────────────────────��─
+// Grants ALREADY AWARDED to organizations in WV/MD/PA (from USAspending). A
+// recently-funded school / municipality / nonprofit is a "funded buyer" — they
+// have budget NOW for the security / network / broadband work PCC2K installs.
+// This is the outreach flip-side of BD_GrantProgram (open programs to apply for).
+// Award amounts can reach billions → BigInt cents.
+
+// ─── PIPELINE (unified deal tracking) ───────────────────────────────────────
+// A polymorphic "deals I'm working" tracker over any lead type. Adding a lead
+// to the pipeline snapshots its title so the board renders without cross-model
+// joins. Stage drives the Kanban-style Pipeline view; valueCents + WON/LOST
+// give win-rate + pipeline-value analytics.
+
+enum BD_PipelineItemType {
+  GRANT
+  BID
+  AWARD
+  MATCH
+  PROPOSAL
+  BUSINESS
+
+  @@schema("bizdev")
+}
+
+enum BD_PipelineStage {
+  PURSUING
+  SUBMITTED
+  WON
+  LOST
+
+  @@schema("bizdev")
+}
+
+model BD_PipelineItem {
+  id          String              @id @default(cuid())
+  itemType    BD_PipelineItemType
+  refId       String
+  titleCached String
+  subtitle    String?
+  stage       BD_PipelineStage    @default(PURSUING)
+  valueCents  BigInt?
+  notes       String?
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+  closedAt    DateTime?
+
+  @@unique([itemType, refId])
+  @@index([stage])
+  @@map("bd_pipeline_items")
+  @@schema("bizdev")
+}
+
+model BD_FundedAward {
+  id                String    @id @default(cuid())
+  source            String    // "usaspending"
+  externalId        String    // generated_internal_id
+  recipientName     String
+  recipientState    String?
+  recipientCity     String?
+  awardAmountCents  BigInt?
+  awardingAgency    String?
+  awardType         String?
+  purpose           String?   // award description
+  startDate         DateTime?
+  endDate           DateTime?
+  sourceUrl         String?   // usaspending.gov award page
+  rawPayload        Json?
+
+  // AI relevance: does this funded org likely need PCC2K install work?
+  relevanceScore    Int?
+  relevanceCategory String?
+  relevanceNotes    String?
+  scoredAt          DateTime?
+  dismissedAt       DateTime?
+
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  @@unique([source, externalId])
+  @@index([relevanceScore])
+  @@map("bd_funded_awards")
   @@schema("bizdev")
 }

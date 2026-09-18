@@ -13,6 +13,7 @@
     "db:generate": "prisma generate"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.24.3",
     "@prisma/client": "^6.0.0",
     "next": "^15.0.0",
     "next-auth": "^4.24.0",
